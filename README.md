@@ -21,7 +21,7 @@
     - 在 Linux 中这个库直接使用 `open` + `write` 向打印机发送 ESC/POS 指令
   - Windows
     - 在 Windows 上这个库使用 `win32print` 来寻找打印机以及发送 ESC/POS 指令
-  - 目前在 RaspberryOS 和 Windows 11 中做了测试。按理来说 macOS 和 Linux 一样用也能用, 但没测过。
+  - 目前在 RaspberryOS 和 Windows 11 中做了测试。按理来说 macOS 也能用, 但没测过。
 
 ## 在 Linux / RaspberryPi 中使用
 
