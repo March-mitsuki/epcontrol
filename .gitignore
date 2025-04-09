@@ -1,0 +1,9 @@
+# python
+__pycache__/
+*.py[cod]
+main.py
+__init__.py
+
+# venv
+venv/
+hprt_venv/
