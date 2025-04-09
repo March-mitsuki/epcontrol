@@ -13,15 +13,15 @@
 - 自定义字体
 - 字体排版
   - 自动换行
-  - 左右排版 (使用 `.betweentext`)
-- 图片 ⚠ Working in progress
-  - 通过 `Pillow` 支持, 只支持黑白
+  - 左右排版
+- 图片
+  - 通过 `Pillow` 支持, 只支持黑白, 非黑白图像会被转为黑白, 不保证打印效果。
 - 多操作系统
   - Linux
     - 在 Linux 中这个库直接使用 `open` + `write` 向打印机发送 ESC/POS 指令
   - Windows
     - 在 Windows 上这个库使用 `win32print` 来寻找打印机以及发送 ESC/POS 指令
-  - 目前在 RaspberryOS 和 Windows 11 中做了测试。按理来说 macOS 和 Linux 一样用也能用, 但没测过。
+  - 目前在 RaspberryOS 和 Windows 11 中做了测试。按理来说 macOS 也能用, 但没测过。
 
 ## 在 Linux / RaspberryPi 中使用
 
