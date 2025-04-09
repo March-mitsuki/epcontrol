@@ -19,7 +19,7 @@ class PrinterConfig:
 
     :param default_font: 默认字体路径
 
-    :param platform: 打印机平台 (windows, linux)
+    :param platform: 打印机平台 ("windows" | "linux")
         - default: 自动检测
     """
 
@@ -60,7 +60,13 @@ class NewLine:
     lines: int
 
 
-ContentUnion = Text | BetweenText | QrCode | NewLine
+@dataclasses.dataclass
+class ImageContent:
+    image: Image.Image
+    max_width: int | None = None
+
+
+ContentUnion = Text | BetweenText | QrCode | NewLine | ImageContent
 
 
 class EscPosPrinter:
@@ -103,7 +109,7 @@ class EscPosPrinter:
     # ==================
     # ===== render =====
     # ==================
-    def _render_image(self) -> Image.Image:
+    def _convert_contents(self) -> Image.Image:
         """
         把 contents 渲染为图像
         """
@@ -134,6 +140,9 @@ class EscPosPrinter:
 
             elif isinstance(content, NewLine):
                 block = self._render_newline(content)
+
+            elif isinstance(content, ImageContent):
+                block = self._render_image(content)
 
             else:
                 raise ValueError(f"Unsupported content type. {content}")
@@ -304,6 +313,23 @@ class EscPosPrinter:
         height = newline_obj.height * newline_obj.lines
         return Image.new("L", (self.paper_width, height), color=255)
 
+    def _render_image(self, img_obj: ImageContent) -> Image.Image:
+        img = img_obj.image.convert("L")  # 转灰度
+
+        if img_obj.max_width:
+            if img_obj.max_width > self.paper_width:
+                img_obj.max_width = self.paper_width
+            if img.width > img_obj.max_width:
+                ratio = img_obj.max_width / img.width
+                new_height = int(img.height * ratio)
+                img = img.resize((img_obj.max_width, new_height))
+
+        # 居中
+        canvas = Image.new("L", (self.paper_width, img.height), color=255)
+        x = (self.paper_width - img.width) // 2
+        canvas.paste(img, (x, 0))
+        return canvas
+
     # =============================
     # ====== ESC/POS command ======
     # =============================
@@ -412,7 +438,8 @@ class EscPosPrinter:
         """
         打印文本内容
 
-        :param align: 对齐方式 (left, center, right)
+        :param align: 对齐方式 ("left" | "center" | "right")
+            - default: "left"
         :param bold: 是否加粗
         :param content: 文本内容
         """
@@ -476,7 +503,7 @@ class EscPosPrinter:
         打印二维码
 
         :param data: 二维码内容
-        :param size: 二维码大小 (sm, md, lg)
+        :param size: 二维码大小 ("sm" | "md" | "lg")
         """
         if size == "sm":
             box_size = 8
@@ -493,11 +520,34 @@ class EscPosPrinter:
         self.contents.append(QrCode(data=data, box_size=box_size, border=border))
         return self
 
+    def image(
+        self,
+        *,
+        image_path,
+        max_width=None,
+    ):
+        """
+        打印图片
+
+        :param image_path: 图片路径
+        :param max_width: 图片最大宽度 (int | None | "full")
+            - int: 缩放到指定宽度
+            - None: 不缩放 (大于纸张宽度时会自动缩放到纸张宽度)
+            - "full": 缩放到纸张宽度
+            - default: None
+        """
+        if max_width == "full":
+            max_width = self.paper_width
+
+        image = Image.open(image_path).convert("L")
+        self.contents.append(ImageContent(image=image, max_width=max_width))
+        return self
+
     def print(self):
         """
         打印所有内容
         """
-        image = self._render_image()
+        image = self._convert_contents()
         # fmt: off
         self \
             ._escpos_init() \
