@@ -101,7 +101,7 @@ class EscPosPrinter:
     def _validate_config(self, config: PrinterConfig):
         if config.paper_width not in PAPER_WIDTH:
             raise ValueError("Invalid paper width. Choose '58mm' or '80mm'.")
-        if config.platform not in ["windows", "linux"]:
+        if config.platform is not None and config.platform not in ["windows", "linux"]:
             raise ValueError(
                 "Unsupported platform. Only 'windows' and 'linux' are supported."
             )
@@ -323,6 +323,11 @@ class EscPosPrinter:
                 ratio = img_obj.max_width / img.width
                 new_height = int(img.height * ratio)
                 img = img.resize((img_obj.max_width, new_height))
+        else:
+            if img.width > self.paper_width:
+                ratio = self.paper_width / img.width
+                new_height = int(img.height * ratio)
+                img = img.resize((self.paper_width, new_height))
 
         # 居中
         canvas = Image.new("L", (self.paper_width, img.height), color=255)
@@ -523,7 +528,7 @@ class EscPosPrinter:
     def image(
         self,
         *,
-        image_path,
+        path,
         max_width=None,
     ):
         """
@@ -539,7 +544,7 @@ class EscPosPrinter:
         if max_width == "full":
             max_width = self.paper_width
 
-        image = Image.open(image_path).convert("L")
+        image = Image.open(path).convert("L")
         self.contents.append(ImageContent(image=image, max_width=max_width))
         return self
 
@@ -564,3 +569,27 @@ class EscPosPrinter:
         """
         self.contents.clear()
         self.commands.clear()
+
+    # =========================
+    # ====== debugging ========
+    # =========================
+    def _debug_converted_image(self, hasgui=False):
+        """
+        显示转换后的图像
+
+        :param hasgui: 是否有 GUI 环境 (用于调试)
+            - default: False
+            - 如果有 GUI 环境, 则显示图像
+            - 如果没有 GUI 环境, 则转换为 jpeg base64 字符串并打印
+        """
+        image = self._convert_contents()
+        if hasgui:
+            image.show()
+        else:
+            import base64
+            from io import BytesIO
+
+            buffered = BytesIO()
+            image.save(buffered, format="JPEG")
+            img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            print(f"data:image/jpeg;base64,{img_str}")
