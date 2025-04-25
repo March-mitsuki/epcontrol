@@ -3,7 +3,7 @@ import qrcode
 import dataclasses
 import sys
 
-from const import PAPER_WIDTH, FONT_SIZES
+from .const import PAPER_WIDTH, FONT_SIZES
 
 
 @dataclasses.dataclass
