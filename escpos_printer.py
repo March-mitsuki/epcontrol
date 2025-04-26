@@ -1,7 +1,9 @@
-from PIL import Image, ImageDraw, ImageFont
-import qrcode
+from __future__ import annotations
 import dataclasses
 import sys
+
+from PIL import Image, ImageDraw, ImageFont
+import qrcode
 
 from .const import PAPER_WIDTH, FONT_SIZES
 
@@ -38,16 +40,6 @@ class Text:
 
 
 @dataclasses.dataclass
-class BetweenText:
-    left: str
-    right: str
-    left_font_size: int
-    right_font_size: int
-    left_font: str
-    right_font: str
-
-
-@dataclasses.dataclass
 class QrCode:
     data: str
     box_size: int
@@ -66,7 +58,356 @@ class ImageContent:
     max_width: int | None = None
 
 
-ContentUnion = Text | BetweenText | QrCode | NewLine | ImageContent
+@dataclasses.dataclass
+class Flex:
+    items: list[Text | QrCode | ImageContent | Flex]
+    # Gap between items in same row
+    item_gap: int
+    # Gap between rows
+    row_gap: int
+    # Horizontal alignment: "left" | "right" | "between"
+    horizontal_align: str
+    # Vertical alignment: "top" | "center" | "bottom"
+    vertical_align: str
+    max_width: int | None = None
+
+
+class FlexItemFactory:
+    def __init__(self, default_font: str, paper_width: int):
+        self.default_font = default_font
+        self.paper_width = paper_width
+
+    def text(
+        self, *, text, aligin="left", font_size=FONT_SIZES["md"], font=None
+    ) -> Text:
+        if font is None:
+            font = self.default_font
+
+        return Text(
+            text=text,
+            align=aligin,
+            font_size=font_size,
+            font=font,
+        )
+
+    def qrcode(self, *, data, size="lg") -> QrCode:
+        if size == "sm":
+            box_size = 8
+            border = 2
+        elif size == "md":
+            box_size = 10
+            border = 2
+        elif size == "lg":
+            box_size = 16
+            border = 2
+        else:
+            raise ValueError("Invalid size. Choose 'sm', 'md', or 'lg'.")
+
+        return QrCode(data=data, box_size=box_size, border=border)
+
+    def image(
+        self,
+        *,
+        image=None,
+        max_width=None,
+    ):
+        if max_width == "full":
+            max_width = self.paper_width
+
+        if image is None:
+            raise ValueError("Image must be provided.")
+
+        return ImageContent(image=image, max_width=max_width)
+
+    def flex(
+        self,
+        *,
+        items: list[Text | QrCode | ImageContent | Flex],
+        item_gap: int = 0,
+        row_gap: int = 0,
+        horizontal_align: str = "left",
+        vertical_align: str = "top",
+        max_width: int | None = None,
+    ) -> Flex:
+        return Flex(
+            items=items,
+            item_gap=item_gap,
+            row_gap=row_gap,
+            horizontal_align=horizontal_align,
+            vertical_align=vertical_align,
+            max_width=max_width,
+        )
+
+
+class FlexRenderer:
+    def __init__(self, flex: Flex, max_width: int | None):
+        self.flex_obj = flex
+        self.max_width = max_width
+
+    def _render_text(self, text_obj: Text, current_x: int) -> list[Image.Image]:
+        """
+        Render a Text object to a list of images, each representing a single line of text.
+        Start rendering from the given current_x position.
+        """
+        try:
+            font = ImageFont.truetype(text_obj.font, text_obj.font_size)
+        except Exception:
+            font = ImageFont.load_default()
+
+        # Split text into lines based on container width and current_x
+        lines = []
+        current_line = ""
+        line_images = []
+        if self.max_width is None:
+            available_width = float("inf")
+        else:
+            available_width = self.max_width - current_x
+
+        for char in text_obj.text:
+            test_line = current_line + char
+            dummy_img = Image.new("L", (1, 1), color=255)
+            draw = ImageDraw.Draw(dummy_img)
+            bbox = draw.textbbox((0, 0), test_line, font=font)
+            if bbox[2] > available_width:  # If line exceeds available width
+                lines.append((current_line, available_width))
+                current_line = char
+                available_width = self.max_width  # Reset available width for new line
+            else:
+                current_line = test_line
+        if current_line:  # Add the last line
+            lines.append((current_line, available_width))
+
+        # Render each line as a separate image
+        for line, line_width in lines:
+            dummy_img = Image.new("L", (1, 1), color=255)
+            draw = ImageDraw.Draw(dummy_img)
+            actual_line_width = draw.textbbox((0, 0), line, font=font)[2]
+            bbox = draw.textbbox((0, 0), line, font=font)
+            line_height = bbox[3] - bbox[1]  # Ensure height includes baseline content
+            img = Image.new("L", (actual_line_width, line_height), color=255)
+            draw = ImageDraw.Draw(img)
+            draw.text((0, -bbox[1]), line, font=font, fill=0)  # Adjust for baseline
+            line_images.append(img)
+
+        return line_images
+
+    def _render_qrcode(self, qr_obj: QrCode) -> Image.Image:
+        """
+        Render a QrCode object to an image.
+        """
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.ERROR_CORRECT_L,
+            box_size=qr_obj.box_size,
+            border=qr_obj.border,
+        )
+        qr.add_data(qr_obj.data)
+        qr.make(fit=True)
+
+        qr_img = qr.make_image(fill_color="black", back_color="white").convert("L")
+        return qr_img
+
+    def _render_image(self, img_obj: ImageContent) -> Image.Image:
+        """
+        Render an ImageContent object to an image.
+        """
+        img = img_obj.image.convert("L")
+        if img_obj.max_width and img.width > img_obj.max_width:
+            ratio = img_obj.max_width / img.width
+            new_height = int(img.height * ratio)
+            img = img.resize((img_obj.max_width, new_height))
+
+        return img
+
+    def render(self) -> Image.Image:
+        """
+        Render a Flex object using Pillow, following CSS flexbox logic.
+
+        :return: A rendered image.
+        """
+        items = self.flex_obj.items
+
+        # Render each item and calculate positions with wrapping
+        rendered_items = []
+        item_positions = []
+        current_x = 0
+        current_y = 0
+        max_row_height = 0
+        rendered_width = 0
+
+        for item in items:
+            if isinstance(item, Text):
+                line_images = self._render_text(item, current_x)
+                for line_img in line_images:
+                    item_width, item_height = line_img.size
+
+                    # Check if the item fits in the current row
+                    if self.max_width and current_x + item_width > self.max_width:
+                        # Move to the next row
+                        current_x = 0
+                        current_y += max_row_height + self.flex_obj.row_gap
+                        max_row_height = 0
+
+                    # Update max_row_height for the current row
+                    max_row_height = max(max_row_height, item_height)
+
+                    # Store the position and rendered item
+                    item_positions.append((current_x, current_y))
+                    rendered_items.append(line_img)
+
+                    # Update current_x for the next item, including item_gap
+                    current_x += item_width + self.flex_obj.item_gap
+
+                    # Update rendered_width
+                    rendered_width = max(rendered_width, current_x)
+
+            elif isinstance(item, QrCode):
+                rendered_item = self._render_qrcode(item)
+                item_width, item_height = rendered_item.size
+
+                # Check if the item fits in the current row
+                if self.max_width and current_x + item_width > self.max_width:
+                    # Move to the next row
+                    current_x = 0
+                    current_y += max_row_height + self.flex_obj.row_gap
+                    max_row_height = 0
+
+                # Update max_row_height for the current row
+                max_row_height = max(max_row_height, item_height)
+
+                # Store the position and rendered item
+                item_positions.append((current_x, current_y))
+                rendered_items.append(rendered_item)
+
+                # Update current_x for the next item, including item_gap
+                current_x += item_width + self.flex_obj.item_gap
+
+                # Update rendered_width
+                rendered_width = max(rendered_width, current_x)
+
+            elif isinstance(item, ImageContent):
+                rendered_item = self._render_image(item)
+                item_width, item_height = rendered_item.size
+
+                # Check if the item fits in the current row
+                if self.max_width and current_x + item_width > self.max_width:
+                    # Move to the next row
+                    current_x = 0
+                    current_y += max_row_height + self.flex_obj.row_gap
+                    max_row_height = 0
+
+                # Update max_row_height for the current row
+                max_row_height = max(max_row_height, item_height)
+
+                # Store the position and rendered item
+                item_positions.append((current_x, current_y))
+                rendered_items.append(rendered_item)
+
+                # Update current_x for the next item, including item_gap
+                current_x += item_width + self.flex_obj.item_gap
+
+                # Update rendered_width
+                rendered_width = max(rendered_width, current_x)
+
+            elif isinstance(item, Flex):
+                # Recursively render nested Flex items
+                nested_renderer = FlexRenderer(item, item.max_width)
+                nested_img = nested_renderer.render()
+                item_width, item_height = nested_img.size
+
+                # Check if the item fits in the current row
+                if current_x + item_width > self.max_width:
+                    # Move to the next row
+                    current_x = 0
+                    current_y += max_row_height + self.flex_obj.row_gap
+                    max_row_height = 0
+
+                # Update max_row_height for the current row
+                max_row_height = max(max_row_height, item_height)
+
+                # Store the position and rendered item
+                item_positions.append((current_x, current_y))
+                rendered_items.append(nested_img)
+
+                # Update current_x for the next item, including item_gap
+                current_x += item_width + self.flex_obj.item_gap
+
+            else:
+                raise ValueError(f"Unsupported item type: {item}")
+
+        # Calculate total height of the rendered content
+        total_height = current_y + max_row_height
+
+        # Adjust positions based on horizontal_align
+        if self.flex_obj.horizontal_align == "right":
+            row_widths = {}
+            for (x, y), item_img in zip(item_positions, rendered_items):
+                row_widths.setdefault(y, 0)
+                row_widths[y] += item_img.size[0] + self.flex_obj.item_gap
+            for i, ((x, y), item_img) in enumerate(zip(item_positions, rendered_items)):
+                row_width = row_widths[y] - self.flex_obj.item_gap  # Remove extra gap
+                offset = self.max_width - row_width
+                item_positions[i] = (x + offset, y)
+        elif self.flex_obj.horizontal_align == "between":
+            row_items = {}
+            for (x, y), item_img in zip(item_positions, rendered_items):
+                row_items.setdefault(y, []).append((x, item_img))
+            for y, items_in_row in row_items.items():
+                total_row_width = sum(item.size[0] for _, item in items_in_row)
+                total_gaps = len(items_in_row) - 1
+                if total_gaps > 0:
+                    extra_gap = (self.max_width - total_row_width) // total_gaps
+                else:
+                    extra_gap = 0
+                current_x = 0
+                for i, (original_x, item_img) in enumerate(items_in_row):
+                    item_width = item_img.size[0]
+                    for j, ((x, row_y), _) in enumerate(
+                        zip(item_positions, rendered_items)
+                    ):
+                        if row_y == y and x == original_x:
+                            item_positions[j] = (current_x, row_y)
+                            break
+                    current_x += item_width + extra_gap
+
+        # Adjust positions based on vertical_align
+        if self.flex_obj.vertical_align in ["center", "bottom"]:
+            row_heights = {}
+            for (x, y), item_img in zip(item_positions, rendered_items):
+                row_heights.setdefault(y, 0)
+                row_heights[y] = max(row_heights[y], item_img.size[1])
+            for i, ((x, y), item_img) in enumerate(zip(item_positions, rendered_items)):
+                row_height = row_heights[y]
+                if self.flex_obj.vertical_align == "center":
+                    offset = (row_height - item_img.size[1]) // 2
+                elif self.flex_obj.vertical_align == "bottom":
+                    offset = row_height - item_img.size[1]
+                else:
+                    offset = 0
+                item_positions[i] = (x, y + offset)
+
+        # Create the final image
+        if self.max_width is None:
+            image_width = rendered_width
+        else:
+            image_width = self.max_width
+
+        final_img = Image.new("L", (image_width, total_height), color=255)
+        for (x, y), item_img in zip(item_positions, rendered_items):
+            final_img.paste(item_img, (x, y))
+
+        return final_img
+
+
+ContentUnion = Text | QrCode | NewLine | ImageContent | Flex
+
+
+class Content:
+    Text = Text
+    QrCode = QrCode
+    NewLine = NewLine
+    ImageContent = ImageContent
+    Flex = Flex
 
 
 class EscPosPrinter:
@@ -98,6 +439,9 @@ class EscPosPrinter:
         # ESC/POS commands
         self.commands = bytearray()
 
+        # add helper
+        self.FlexItem = FlexItemFactory(self.default_font, self.paper_width)
+
     def _validate_config(self, config: PrinterConfig):
         if config.paper_width not in PAPER_WIDTH:
             raise ValueError("Invalid paper width. Choose '58mm' or '80mm'.")
@@ -119,37 +463,38 @@ class EscPosPrinter:
 
         for content in self.contents:
             if isinstance(content, Text):
-                block = self._render_text(content)
-
-                line_spacing = NewLine(lines=1, height=int(content.font_size / 2))
-                spacing_block = self._render_newline(line_spacing)
-                rendered_blocks.append(spacing_block)
-                total_height += spacing_block.height
-
-            elif isinstance(content, BetweenText):
-                block = self._render_betweentext(content)
-
-                max_font_size = max(content.left_font_size, content.right_font_size)
-                line_spacing = NewLine(lines=1, height=int(max_font_size / 2))
-                spacing_block = self._render_newline(line_spacing)
-                rendered_blocks.append(spacing_block)
-                total_height += spacing_block.height
+                blocks = self._render_text(content)
+                for _block in blocks:
+                    line_spacing = NewLine(lines=1, height=int(content.font_size / 2))
+                    spacing_block = self._render_newline(line_spacing)
+                    rendered_blocks.append(spacing_block)
+                    total_height += spacing_block.height
+                    rendered_blocks.append(_block)
+                    total_height += _block.height
 
             elif isinstance(content, QrCode):
                 block = self._render_qrcode(content)
+                rendered_blocks.append(block)
+                total_height += block.height
 
             elif isinstance(content, NewLine):
                 block = self._render_newline(content)
+                rendered_blocks.append(block)
+                total_height += block.height
 
             elif isinstance(content, ImageContent):
                 block = self._render_image(content)
+                rendered_blocks.append(block)
+                total_height += block.height
+
+            elif isinstance(content, Flex):
+                renderer = FlexRenderer(content, self.paper_width)
+                block = renderer.render()
+                rendered_blocks.append(block)
+                total_height += block.height
 
             else:
                 raise ValueError(f"Unsupported content type. {content}")
-
-            rendered_blocks.append(block)
-            total_height += block.height
-
         # 创建最终图像
         result_img = Image.new("L", (self.paper_width, total_height), color=255)
         y_offset = 0
@@ -159,133 +504,43 @@ class EscPosPrinter:
 
         return result_img
 
-    def _render_text(self, text_obj: Text) -> Image.Image:
+    def _render_text(self, text_obj: Text) -> list[Image.Image]:
         try:
             font = ImageFont.truetype(text_obj.font, text_obj.font_size)
         except Exception:
             font = ImageFont.load_default()
 
-        words = list(text_obj.text)
+        # Split text into lines based on container width and current_x
         lines = []
         current_line = ""
-        dummy_img = Image.new("L", (self.paper_width, 1), color=255)
-        draw = ImageDraw.Draw(dummy_img)
+        line_images = []
 
-        for word in words:
-            test_line = current_line + ("" if current_line == "" else " ") + word
+        for char in text_obj.text:
+            test_line = current_line + char
+            dummy_img = Image.new("L", (1, 1), color=255)
+            draw = ImageDraw.Draw(dummy_img)
             bbox = draw.textbbox((0, 0), test_line, font=font)
-            test_width = bbox[2] - bbox[0]
-
-            if test_width <= self.paper_width:
-                current_line = test_line
+            if bbox[2] > self.paper_width:  # If line exceeds available width
+                lines.append((current_line, self.paper_width))
+                current_line = char
             else:
-                lines.append(current_line)
-                current_line = word
+                current_line = test_line
+        if current_line:  # Add the last line
+            lines.append((current_line, self.paper_width))
 
-        if current_line:
-            lines.append(current_line)
-
-        line_height = font.getbbox("A")[3] + 4  # 加些padding
-        img_height = line_height * len(lines)
-        img = Image.new("L", (self.paper_width, img_height), color=255)
-        draw = ImageDraw.Draw(img)
-
-        for i, line in enumerate(lines):
+        # Render each line as a separate image
+        for line, line_width in lines:
+            dummy_img = Image.new("L", (1, 1), color=255)
+            draw = ImageDraw.Draw(dummy_img)
+            actual_line_width = draw.textbbox((0, 0), line, font=font)[2]
             bbox = draw.textbbox((0, 0), line, font=font)
-            line_width = bbox[2] - bbox[0]
-
-            # 对齐
-            if text_obj.align == "center":
-                x = (self.paper_width - line_width) // 2
-            elif text_obj.align == "right":
-                x = self.paper_width - line_width
-            else:  # left
-                x = 0
-
-            draw.text((x, i * line_height), line, font=font, fill=0)
-
-        return img
-
-    def _render_betweentext(self, bt_obj: BetweenText) -> Image.Image:
-        # 加载字体
-        try:
-            left_font = ImageFont.truetype(bt_obj.left_font, bt_obj.left_font_size)
-        except Exception:
-            left_font = ImageFont.load_default()
-
-        try:
-            right_font = ImageFont.truetype(bt_obj.right_font, bt_obj.right_font_size)
-        except Exception:
-            right_font = ImageFont.load_default()
-
-        draw_dummy = ImageDraw.Draw(Image.new("L", (self.paper_width, 1), color=255))
-
-        def text_width(text, font):
-            bbox = draw_dummy.textbbox((0, 0), text, font=font)
-            return bbox[2] - bbox[0]
-
-        def wrap_text(text, font):
-            lines = []
-            line = ""
-            for char in text:
-                test_line = line + char
-                if text_width(test_line, font) <= self.paper_width:
-                    line = test_line
-                else:
-                    if line:
-                        lines.append(line)
-                    line = char
-            if line:
-                lines.append(line)
-            return lines
-
-        total_width = text_width(bt_obj.left, left_font) + text_width(
-            bt_obj.right, right_font
-        )
-
-        if total_width <= self.paper_width:
-            # 一行能容下，左对齐 + 右对齐 同一行
-            line_height = max(left_font.getbbox("A")[3], right_font.getbbox("A")[3]) + 4
-            img = Image.new("L", (self.paper_width, line_height), color=255)
+            line_height = bbox[3] - bbox[1]  # Ensure height includes baseline content
+            img = Image.new("L", (actual_line_width, line_height), color=255)
             draw = ImageDraw.Draw(img)
+            draw.text((0, -bbox[1]), line, font=font, fill=0)  # Adjust for baseline
+            line_images.append(img)
 
-            draw.text((0, 0), bt_obj.left, font=left_font, fill=0)
-            right_x = self.paper_width - text_width(bt_obj.right, right_font)
-            draw.text((right_x, 0), bt_obj.right, font=right_font, fill=0)
-
-            return img
-        else:
-            # 分开渲染多行
-            left_lines = wrap_text(bt_obj.left, left_font)
-            right_lines = wrap_text(bt_obj.right, right_font)
-
-            left_line_height = left_font.getbbox("A")[3] + 4
-            right_line_height = right_font.getbbox("A")[3] + 4
-
-            left_img = Image.new(
-                "L", (self.paper_width, left_line_height * len(left_lines)), color=255
-            )
-            draw_left = ImageDraw.Draw(left_img)
-            for i, line in enumerate(left_lines):
-                draw_left.text((0, i * left_line_height), line, font=left_font, fill=0)
-
-            right_img = Image.new(
-                "L", (self.paper_width, right_line_height * len(right_lines)), color=255
-            )
-            draw_right = ImageDraw.Draw(right_img)
-            for i, line in enumerate(right_lines):
-                x = self.paper_width - text_width(line, right_font)
-                draw_right.text(
-                    (x, i * right_line_height), line, font=right_font, fill=0
-                )
-
-            # 合并上下
-            total_height = left_img.height + right_img.height
-            final_img = Image.new("L", (self.paper_width, total_height), color=255)
-            final_img.paste(left_img, (0, 0))
-            final_img.paste(right_img, (0, left_img.height))
-
-            return final_img
+        return line_images
 
     def _render_qrcode(self, qr_obj: QrCode) -> Image.Image:
         qr = qrcode.QRCode(
@@ -443,51 +698,17 @@ class EscPosPrinter:
         """
         打印文本内容
 
+        :param text: 文本内容
         :param align: 对齐方式 ("left" | "center" | "right")
             - default: "left"
-        :param bold: 是否加粗
-        :param content: 文本内容
+        :param font_size: 字体大小 (int)
+        :param font: 字体路径
+            - default: self.default_font
         """
         if font is None:
             font = self.default_font
         self.contents.append(
             Text(text=text, align=align, font_size=font_size, font=font)
-        )
-        return self
-
-    def betweentext(
-        self,
-        *,
-        left,
-        right,
-        left_font_size=FONT_SIZES["md"],
-        right_font_size=FONT_SIZES["md"],
-        left_font=None,
-        right_font=None,
-    ):
-        """
-        打印左右对齐的文本内容
-
-        :param left: 左侧文本内容
-        :param right: 右侧文本内容
-        :param left_font_size: 左侧文本字体大小
-        :param right_font_size: 右侧文本字体大小
-        :param left_font: 左侧文本字体路径
-        :param right_font: 右侧文本字体路径
-        """
-        if left_font is None:
-            left_font = self.default_font
-        if right_font is None:
-            right_font = self.default_font
-        self.contents.append(
-            BetweenText(
-                left=left,
-                right=right,
-                left_font_size=left_font_size,
-                right_font_size=right_font_size,
-                left_font=left_font,
-                right_font=right_font,
-            )
         )
         return self
 
@@ -528,13 +749,15 @@ class EscPosPrinter:
     def image(
         self,
         *,
-        path,
+        image=None,
         max_width=None,
     ):
         """
         打印图片
 
-        :param image_path: 图片路径
+        :param image: (str | Image.Image)
+            - str: 图片路径
+            - Image.Image: PIL 图像对象
         :param max_width: 图片最大宽度 (int | None | "full")
             - int: 缩放到指定宽度
             - None: 不缩放 (大于纸张宽度时会自动缩放到纸张宽度)
@@ -544,8 +767,51 @@ class EscPosPrinter:
         if max_width == "full":
             max_width = self.paper_width
 
-        image = Image.open(path).convert("L")
+        if image is None:
+            raise ValueError("Image must be provided.")
+
+        if not isinstance(image, Image.Image) and not isinstance(image, str):
+            raise ValueError("Image must be a PIL Image or a file path.")
+
+        if isinstance(image, str):
+            image = Image.open(image).convert("L")
+
         self.contents.append(ImageContent(image=image, max_width=max_width))
+        return self
+
+    def flex(
+        self,
+        *,
+        items: list[Text | QrCode | ImageContent | Flex],
+        item_gap: int = 0,
+        row_gap: int = 0,
+        horizontal_align: str = "left",
+        vertical_align: str = "top",
+    ):
+        """
+        打印 Flex 布局内容
+
+        :param items: Flex 布局的内容列表
+            - list[Text | QrCode | ImageContent]
+        :param item_gap: 同一行内元素之间的间距 (int)
+            - default: 0
+        :param row_gap: 行与行之间的间距 (int)
+            - default: 0
+        :param horizontal_align: 水平对齐方式 ("left" | "right" | "between")
+            - default: "left"
+        :param vertical_align: 垂直对齐方式 ("top" | "center" | "bottom")
+            - default: "top"
+        """
+        self.contents.append(
+            Flex(
+                items=items,
+                item_gap=item_gap,
+                row_gap=row_gap,
+                horizontal_align=horizontal_align,
+                vertical_align=vertical_align,
+                max_width=self.paper_width,
+            )
+        )
         return self
 
     def print(self):

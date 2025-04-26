@@ -12,8 +12,9 @@
 - 多国语言 (目前只支持从左到右排版的语言)
 - 自定义字体
 - 字体排版
-  - 自动换行
-  - 左右排版
+  - 支持自动换行
+- Flex Layout
+  - 支持嵌套, 嵌套时需要使用 `printer.FlexItem.flex()`
 - 图片
   - 通过 `Pillow` 支持, 只支持黑白, 非黑白图像会被转为黑白, 不保证打印效果。
 - 多操作系统
@@ -105,6 +106,36 @@ sudo apt install fonts-noto-cjk
 ```py
 from escpos_printer import EscPosPrinter, PrinterConfig
 from const import FONT_SIZES
+from PIL import Image, ImageDraw
+
+
+def draw_hollow_square(
+    size: int,
+    square_size: int,
+    line_width: int = 2,
+    corner_radius: int = 0,
+    line_color: str = "black",
+    background_color: str = "white",
+):
+    img = Image.new("RGB", (size, size), color=background_color)
+    draw = ImageDraw.Draw(img)
+
+    left = (size - square_size) // 2
+    top = (size - square_size) // 2
+    right = left + square_size
+    bottom = top + square_size
+
+    if corner_radius > 0:
+        draw.rounded_rectangle(
+            [left, top, right, bottom],
+            radius=corner_radius,
+            outline=line_color,
+            width=line_width,
+        )
+    else:
+        draw.rectangle([left, top, right, bottom], outline=line_color, width=line_width)
+
+    return img
 
 if __name__ == "__main__":
     # 示例：创建一个打印机对象，指定打印机名称和纸张宽度
@@ -115,6 +146,7 @@ if __name__ == "__main__":
             default_font="/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
         )
     )
+    checkbox = draw_hollow_square(size=20, square_size=16)
 
     # fmt: off
     printer \
@@ -133,13 +165,26 @@ if __name__ == "__main__":
             align="left",
             font_size=FONT_SIZES["lg"],
         ) \
-        .betweentext(
-            left="羊肉串:",
-            right="10.00元",
-        ) \
-        .betweentext(
-            left="很长很长很长很长很长很长很长很长很长很长很长很长的菜单名称:",
-            right="20.00元",
+        .flex(
+            items=[
+                printer.FlexItem.flex(
+                    items=[
+                        printer.FlexItem.image(
+                            image=checkbox,
+                        ),
+                        printer.FlexItem.text(
+                            text="可乐:"
+                        ),
+                    ],
+                    vertical_align="center",
+                    item_gap=5,
+                ),
+                printer.FlexItem.text(
+                    text="12.00元"
+                ),
+            ],
+            horizontal_align="between",
+            vertical_align="center",
         ) \
         .qrcode(
             data="https://www.google.com",
@@ -176,6 +221,36 @@ pip install pillow qrcode
 ```py
 from escpos_printer import EscPosPrinter, PrinterConfig
 from const import FONT_SIZES
+from PIL import Image, ImageDraw
+
+
+def draw_hollow_square(
+    size: int,
+    square_size: int,
+    line_width: int = 2,
+    corner_radius: int = 0,
+    line_color: str = "black",
+    background_color: str = "white",
+):
+    img = Image.new("RGB", (size, size), color=background_color)
+    draw = ImageDraw.Draw(img)
+
+    left = (size - square_size) // 2
+    top = (size - square_size) // 2
+    right = left + square_size
+    bottom = top + square_size
+
+    if corner_radius > 0:
+        draw.rounded_rectangle(
+            [left, top, right, bottom],
+            radius=corner_radius,
+            outline=line_color,
+            width=line_width,
+        )
+    else:
+        draw.rectangle([left, top, right, bottom], outline=line_color, width=line_width)
+
+    return img
 
 if __name__ == "__main__":
     # 示例：创建一个打印机对象，指定打印机名称和纸张宽度
@@ -186,6 +261,7 @@ if __name__ == "__main__":
             default_font="C:/Windows/Fonts/msyh.ttc",
         )
     )
+    checkbox = draw_hollow_square(size=20, square_size=16)
 
     # fmt: off
     printer \
@@ -198,20 +274,32 @@ if __name__ == "__main__":
             text="こんにちは。この行は結構長いと思いますので、ご注意ください。",
             font_size=FONT_SIZES["md"],
             align="center",
-            font="C:/Windows/Fonts/msmincho.ttc",
         ) \
         .text(
             text="靠左对齐的文本",
             align="left",
             font_size=FONT_SIZES["lg"],
         ) \
-        .betweentext(
-            left="羊肉串:",
-            right="10.00元",
-        ) \
-        .betweentext(
-            left="很长很长很长很长很长很长很长很长很长很长很长很长的菜单名称:",
-            right="20.00元",
+        .flex(
+            items=[
+                printer.FlexItem.flex(
+                    items=[
+                        printer.FlexItem.image(
+                            image=checkbox,
+                        ),
+                        printer.FlexItem.text(
+                            text="可乐:"
+                        ),
+                    ],
+                    vertical_align="center",
+                    item_gap=5,
+                ),
+                printer.FlexItem.text(
+                    text="12.00元"
+                ),
+            ],
+            horizontal_align="between",
+            vertical_align="center",
         ) \
         .qrcode(
             data="https://www.google.com",
