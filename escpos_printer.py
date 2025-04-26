@@ -29,6 +29,7 @@ class PrinterConfig:
     paper_width: str
     default_font: str
     platform: str | None = None
+    padding_x: int = 10
 
 
 @dataclasses.dataclass
@@ -412,6 +413,12 @@ class Content:
     Flex = Flex
 
 
+@dataclasses.dataclass
+class _RenderedBlock:
+    image: Image.Image
+    x: int
+
+
 class EscPosPrinter:
     """
     ESC/POS 打印机类
@@ -425,6 +432,7 @@ class EscPosPrinter:
         self.printer_name = config.printer_name
         self.paper_width = PAPER_WIDTH[config.paper_width]
         self.default_font = config.default_font
+        self.padding_x = config.padding_x
         if config.platform is None:
             if sys.platform.startswith("win"):
                 self.platform = "windows"
@@ -460,7 +468,7 @@ class EscPosPrinter:
         把 contents 渲染为图像
         """
         # 先生成每一段的 Image，收集所有高度
-        rendered_blocks: list[Image.Image] = []
+        rendered_blocks: list[_RenderedBlock] = []
         total_height = 0
 
         for content in self.contents:
@@ -469,30 +477,30 @@ class EscPosPrinter:
                 for _block in blocks:
                     line_spacing = NewLine(lines=1, height=int(content.font_size / 2))
                     spacing_block = self._render_newline(line_spacing)
-                    rendered_blocks.append(spacing_block)
+                    rendered_blocks.append(_RenderedBlock(spacing_block, 0))
                     total_height += spacing_block.height
-                    rendered_blocks.append(_block)
+                    rendered_blocks.append(_RenderedBlock(_block, 0))
                     total_height += _block.height
 
             elif isinstance(content, QrCode):
                 block = self._render_qrcode(content)
-                rendered_blocks.append(block)
+                rendered_blocks.append(_RenderedBlock(block, 0))
                 total_height += block.height
 
             elif isinstance(content, NewLine):
                 block = self._render_newline(content)
-                rendered_blocks.append(block)
+                rendered_blocks.append(_RenderedBlock(block, 0))
                 total_height += block.height
 
             elif isinstance(content, ImageContent):
                 block = self._render_image(content)
-                rendered_blocks.append(block)
+                rendered_blocks.append(_RenderedBlock(block, 0))
                 total_height += block.height
 
             elif isinstance(content, Flex):
-                renderer = FlexRenderer(content, self.paper_width)
+                renderer = FlexRenderer(content, self.paper_width - 2 * self.padding_x)
                 block = renderer.render()
-                rendered_blocks.append(block)
+                rendered_blocks.append(_RenderedBlock(block, self.padding_x))
                 total_height += block.height
 
             else:
@@ -501,8 +509,8 @@ class EscPosPrinter:
         result_img = Image.new("L", (self.paper_width, total_height), color=255)
         y_offset = 0
         for block in rendered_blocks:
-            result_img.paste(block, (0, y_offset))
-            y_offset += block.height
+            result_img.paste(block.image, (block.x, y_offset))
+            y_offset += block.image.height
 
         return result_img
 
@@ -522,13 +530,15 @@ class EscPosPrinter:
             dummy_img = Image.new("L", (1, 1), color=255)
             draw = ImageDraw.Draw(dummy_img)
             bbox = draw.textbbox((0, 0), test_line, font=font)
-            if bbox[2] > self.paper_width:  # If line exceeds available width
-                lines.append((current_line, self.paper_width))
+            if bbox[2] > (
+                self.paper_width - 2 * self.padding_x
+            ):  # Adjust for padding_x
+                lines.append((current_line, self.paper_width - 2 * self.padding_x))
                 current_line = char
             else:
                 current_line = test_line
         if current_line:  # Add the last line
-            lines.append((current_line, self.paper_width))
+            lines.append((current_line, self.paper_width - 2 * self.padding_x))
 
         # Render each line as a separate image
         for line, line_width in lines:
@@ -539,11 +549,11 @@ class EscPosPrinter:
             line_height = bbox[3] - bbox[1]  # Ensure height includes baseline content
 
             if text_obj.align == "left":
-                x_offset = 0
+                x_offset = self.padding_x
             elif text_obj.align == "center":
                 x_offset = (self.paper_width - actual_line_width) // 2
             elif text_obj.align == "right":
-                x_offset = self.paper_width - actual_line_width
+                x_offset = self.paper_width - actual_line_width - self.padding_x
             else:
                 raise ValueError(f"Unsupported alignment: {text_obj.align}")
 
@@ -568,10 +578,15 @@ class EscPosPrinter:
 
         qr_img = qr.make_image(fill_color="black", back_color="white").convert("L")
 
-        # 居中处理
+        # Centering with padding_x
         qr_width, qr_height = qr_img.size
-        if qr_width > self.paper_width:
-            qr_img = qr_img.resize((self.paper_width, self.paper_width))
+        if qr_width > (self.paper_width - 2 * self.padding_x):
+            qr_img = qr_img.resize(
+                (
+                    self.paper_width - 2 * self.padding_x,
+                    self.paper_width - 2 * self.padding_x,
+                )
+            )
 
         final_img = Image.new("L", (self.paper_width, qr_img.height), color=255)
         x = (self.paper_width - qr_img.width) // 2
@@ -583,22 +598,22 @@ class EscPosPrinter:
         return Image.new("L", (self.paper_width, height), color=255)
 
     def _render_image(self, img_obj: ImageContent) -> Image.Image:
-        img = img_obj.image.convert("L")  # 转灰度
+        img = img_obj.image.convert("L")  # Convert to grayscale
 
         if img_obj.max_width:
-            if img_obj.max_width > self.paper_width:
-                img_obj.max_width = self.paper_width
+            if img_obj.max_width > (self.paper_width - 2 * self.padding_x):
+                img_obj.max_width = self.paper_width - 2 * self.padding_x
             if img.width > img_obj.max_width:
                 ratio = img_obj.max_width / img.width
                 new_height = int(img.height * ratio)
                 img = img.resize((img_obj.max_width, new_height))
         else:
-            if img.width > self.paper_width:
-                ratio = self.paper_width / img.width
+            if img.width > (self.paper_width - 2 * self.padding_x):
+                ratio = (self.paper_width - 2 * self.padding_x) / img.width
                 new_height = int(img.height * ratio)
-                img = img.resize((self.paper_width, new_height))
+                img = img.resize((self.paper_width - 2 * self.padding_x, new_height))
 
-        # 居中
+        # Centering with padding_x
         canvas = Image.new("L", (self.paper_width, img.height), color=255)
         x = (self.paper_width - img.width) // 2
         canvas.paste(img, (x, 0))

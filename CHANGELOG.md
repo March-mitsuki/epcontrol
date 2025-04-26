@@ -1,3 +1,7 @@
+# v0.3.0
+## Add
+- PrinterConfig.padding_x
+
 # v0.2.1
 ## Fix
 - EscPosPrinter.text()
