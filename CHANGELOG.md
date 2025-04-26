@@ -1,3 +1,8 @@
+# v0.2.1
+## Fix
+- EscPosPrinter.text()
+  - 修复了 align 不起作用的问题
+
 # v0.2.0
 ## Remove
 - EscPosPrinter.betweentext()

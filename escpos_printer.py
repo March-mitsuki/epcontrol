@@ -148,6 +148,8 @@ class FlexRenderer:
         """
         Render a Text object to a list of images, each representing a single line of text.
         Start rendering from the given current_x position.
+
+        Will ignore the text alignment in the Text object.
         """
         try:
             font = ImageFont.truetype(text_obj.font, text_obj.font_size)
@@ -535,9 +537,21 @@ class EscPosPrinter:
             actual_line_width = draw.textbbox((0, 0), line, font=font)[2]
             bbox = draw.textbbox((0, 0), line, font=font)
             line_height = bbox[3] - bbox[1]  # Ensure height includes baseline content
-            img = Image.new("L", (actual_line_width, line_height), color=255)
+
+            if text_obj.align == "left":
+                x_offset = 0
+            elif text_obj.align == "center":
+                x_offset = (self.paper_width - actual_line_width) // 2
+            elif text_obj.align == "right":
+                x_offset = self.paper_width - actual_line_width
+            else:
+                raise ValueError(f"Unsupported alignment: {text_obj.align}")
+
+            img = Image.new("L", (self.paper_width, line_height), color=255)
             draw = ImageDraw.Draw(img)
-            draw.text((0, -bbox[1]), line, font=font, fill=0)  # Adjust for baseline
+            draw.text(
+                (x_offset, -bbox[1]), line, font=font, fill=0
+            )  # Adjust for baseline
             line_images.append(img)
 
         return line_images
