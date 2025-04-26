@@ -57,6 +57,7 @@ class Text:
     align: str
     font_size: int
     font: str
+    line_spacing: int
 
 
 @dataclasses.dataclass
@@ -98,7 +99,12 @@ class FlexItemFactory:
         self.paper_width = paper_width
 
     def text(
-        self, *, text, aligin="left", font_size=FONT_SIZES["md"], font=None
+        self,
+        *,
+        text,
+        aligin="left",
+        font_size=FONT_SIZES["md"],
+        font=None,
     ) -> Text:
         if font is None:
             font = self.default_font
@@ -108,6 +114,7 @@ class FlexItemFactory:
             align=aligin,
             font_size=font_size,
             font=font,
+            line_spacing=0,
         )
 
     def qrcode(self, *, data, size="lg") -> QrCode:
@@ -169,7 +176,8 @@ class FlexRenderer:
         Render a Text object to a list of images, each representing a single line of text.
         Start rendering from the given current_x position.
 
-        Will ignore the text alignment in the Text object.
+        Will ignore the Text.align and Text.line_spacing attributes.
+        You can use the Flex.row_gap and Flex.item_gap attributes to control the spacing.
         """
         try:
             font = ImageFont.truetype(text_obj.font, text_obj.font_size)
@@ -499,11 +507,14 @@ class EscPosPrinter:
         for content in self.contents:
             if isinstance(content, Text):
                 blocks = self._render_text(content)
-                for _block in blocks:
-                    line_spacing = NewLine(lines=1, height=int(content.font_size / 2))
-                    spacing_block = self._render_newline(line_spacing)
-                    rendered_blocks.append(_RenderedBlock(spacing_block, 0))
-                    total_height += spacing_block.height
+                for index, _block in enumerate(blocks):
+                    if len(blocks) > 1 and index > 0 and content.line_spacing > 0:
+                        spacing_bloak = self._render_newline(
+                            NewLine(lines=1, height=content.line_spacing)
+                        )
+                        rendered_blocks.append(_RenderedBlock(spacing_bloak, 0))
+                        total_height += spacing_bloak.height
+
                     rendered_blocks.append(_RenderedBlock(_block, 0))
                     total_height += _block.height
 
@@ -765,6 +776,7 @@ class EscPosPrinter:
         align="left",
         font_size=FONT_SIZES["md"],
         font=None,
+        line_spacing=4,
     ):
         """
         打印文本内容
@@ -775,11 +787,19 @@ class EscPosPrinter:
         :param font_size: 字体大小 (int)
         :param font: 字体路径
             - default: self.default_font
+        :param line_spacing: 行间距 (int)
+            - default: 4
         """
         if font is None:
             font = self.default_font
         self.contents.append(
-            Text(text=text, align=align, font_size=font_size, font=font)
+            Text(
+                text=text,
+                align=align,
+                font_size=font_size,
+                font=font,
+                line_spacing=line_spacing,
+            )
         )
         return self
 

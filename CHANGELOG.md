@@ -1,3 +1,7 @@
+# v0.5.0
+- printer.text()
+  - 增加 line_spacing 参数, 当text长度大于一行时的行间距
+
 # v0.4.0
 ## Add
 Add macOS support
