@@ -9,6 +9,25 @@ from .const import PAPER_WIDTH, FONT_SIZES
 
 
 @dataclasses.dataclass
+class UsbInfo:
+    """
+    打印机连接类, 现在只用于 macOS
+
+    :param vendor_id: USB 设备的供应商 ID
+    :param product_id: USB 设备的产品 ID
+    :param interface: USB 接口号
+    :param in_ep: 输入端点
+    :param out_ep: 输出端点
+    """
+
+    vendor_id: int
+    product_id: int
+    interface: int = 0
+    in_ep: int = 0x81
+    out_ep: int = 0x02
+
+
+@dataclasses.dataclass
 class PrinterConfig:
     """
     打印机配置类
@@ -21,7 +40,7 @@ class PrinterConfig:
 
     :param default_font: 默认字体路径
 
-    :param platform: 打印机平台 ("windows" | "linux")
+    :param platform: 打印机平台 ("windows" | "linux" | "macos)
         - default: 自动检测
     """
 
@@ -426,7 +445,7 @@ class EscPosPrinter:
     把所有打印内容渲染为图像，然后通过 ESC/POS 指令发送到打印机
     """
 
-    def __init__(self, config: PrinterConfig):
+    def __init__(self, config: PrinterConfig, usb_info: UsbInfo | None = None):
         # Setup printer config
         self._validate_config(config)
         self.printer_name = config.printer_name
@@ -438,12 +457,16 @@ class EscPosPrinter:
                 self.platform = "windows"
             elif sys.platform.startswith("linux"):
                 self.platform = "linux"
+            elif sys.platform.startswith("darwin"):
+                self.platform = "macos"
             else:
-                raise ValueError(
-                    "Unsupported platform. Only 'windows' and 'linux' are supported."
-                )
+                raise ValueError(f"Unsupported platform: {sys.platform}")
         else:
             self.platform = config.platform
+
+        self.usb_info = usb_info
+        if config.platform == "macos" and usb_info is None:
+            raise ValueError("macos_connect must be provided for macOS platform.")
 
         self.contents: list[ContentUnion] = []
         # ESC/POS commands
@@ -454,11 +477,13 @@ class EscPosPrinter:
 
     def _validate_config(self, config: PrinterConfig):
         if config.paper_width not in PAPER_WIDTH:
-            raise ValueError("Invalid paper width. Choose '58mm' or '80mm'.")
-        if config.platform is not None and config.platform not in ["windows", "linux"]:
-            raise ValueError(
-                "Unsupported platform. Only 'windows' and 'linux' are supported."
-            )
+            raise ValueError("Invalid Config: paper_width. Choose '58mm' or '80mm'.")
+        if config.platform is not None and config.platform not in [
+            "windows",
+            "linux",
+            "macos",
+        ]:
+            raise ValueError("Invalid Config: Unsupported platform.")
 
     # ==================
     # ===== render =====
@@ -700,6 +725,21 @@ class EscPosPrinter:
                 f"Permission denied to access printer '{self.printer_name}'."
             )
 
+    def _escpos_send_macos(self):
+        from escpos.printer import Usb
+
+        if not self.usb_info:
+            raise ValueError("USB info is required for macOS platform.")
+
+        p = Usb(
+            self.usb_info.vendor_id,
+            self.usb_info.product_id,
+            interface=self.usb_info.interface,
+            in_ep=self.usb_info.in_ep,
+            out_ep=self.usb_info.out_ep,
+        )
+        p._raw(self.commands)
+
     def _escpos_send(self):
         """
         发送命令到打印机
@@ -708,6 +748,8 @@ class EscPosPrinter:
             self._escpos_send_windows()
         elif self.platform == "linux":
             self._escpos_send_linux()
+        elif self.platform == "macos":
+            self._escpos_send_macos()
         else:
             raise ValueError(
                 "Unsupported platform. Only 'windows' and 'linux' are supported."

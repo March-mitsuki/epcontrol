@@ -1,3 +1,7 @@
+# v0.4.0
+## Add
+Add macOS support
+
 # v0.3.0
 ## Add
 - PrinterConfig.padding_x

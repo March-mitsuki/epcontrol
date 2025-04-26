@@ -21,8 +21,10 @@
   - Linux
     - 在 Linux 中这个库直接使用 `open` + `write` 向打印机发送 ESC/POS 指令
   - Windows
-    - 在 Windows 上这个库使用 `win32print` 来寻找打印机以及发送 ESC/POS 指令
-  - 目前在 RaspberryOS 和 Windows 11 中做了测试。按理来说 macOS 也能用, 但没测过。
+    - 在 Windows 中这个库使用 `win32print` 来寻找打印机以及发送 ESC/POS 指令
+  - MacOS
+    - 在 MacOS 中这个库使用 `escpos.printer` 中的 `Usb` 来连接到打印机以及发送 ESC/POS 指令
+  - 目前在 RaspberryOS 和 Windows 11 和 MacOS 15 中做了测试。
 
 ## 在 Linux / RaspberryPi 中使用
 
@@ -260,6 +262,158 @@ if __name__ == "__main__":
             paper_width="58mm",
             default_font="C:/Windows/Fonts/msyh.ttc",
         )
+    )
+    checkbox = draw_hollow_square(size=20, square_size=16)
+
+    # fmt: off
+    printer \
+        .text(
+            text="Hello, World!",
+            font_size=FONT_SIZES["sm"],
+            align="right",
+        ) \
+        .text(
+            text="こんにちは。この行は結構長いと思いますので、ご注意ください。",
+            font_size=FONT_SIZES["md"],
+            align="center",
+        ) \
+        .text(
+            text="靠左对齐的文本",
+            align="left",
+            font_size=FONT_SIZES["lg"],
+        ) \
+        .flex(
+            items=[
+                printer.FlexItem.flex(
+                    items=[
+                        printer.FlexItem.image(
+                            image=checkbox,
+                        ),
+                        printer.FlexItem.text(
+                            text="可乐:"
+                        ),
+                    ],
+                    vertical_align="center",
+                    item_gap=5,
+                ),
+                printer.FlexItem.text(
+                    text="12.00元"
+                ),
+            ],
+            horizontal_align="between",
+            vertical_align="center",
+        ) \
+        .qrcode(
+            data="https://www.google.com",
+            size="lg"
+        ).print()
+```
+
+## 在 MacOS 中使用
+
+- 你的打印机支持连接 MacOS
+- 需要你手动设置连接地址
+- 需要自己安装需要打印的字体到 OS 中
+- 当前用户有权限操作 USB 设备
+
+使用 MacOS 15.3.1 + 汉印 HPRT TP582 测试
+
+### MacOS Setup
+首先克隆这个库, 或者用 git submodule 或者用别的方法下载下来都行。(可能之后会分发到 pip, 有点懒)
+```sh
+git clone <this-repo-url>
+```
+
+这个库有依赖, 所以你需要先安装依赖库
+```sh
+pip install pillow qrcode escpos
+```
+
+然后按照 python 导入方式导进去就行了。
+
+**注意:**
+
+在 MacOS 中这个库使用 `escpos.printer` 中的 `Usb` 来连接到打印机以及发送 ESC/POS 指令
+
+所以你需要自己找到打印机连接到了哪里, 下面我以 汉印 HPRT TP582 作为例子
+
+#### Find USB Device
+把你的打印机连接上 MacOS 之后在 terminal 中输入以下指令
+```sh
+system_profiler SPUSBDataType
+```
+
+然后应该会看到类似下面这类的输出。(下面这段是 TP582 的输出, 其他打印机不一样)
+```txt
+TP582:
+
+    Product ID: 0x1919
+    Vendor ID: 0x8100
+    Version: 0.00
+    Speed: Up to 12 Mb/s
+    Manufacturer: HPRT
+    Location ID: 0x01919810 / 7
+    Current Available (mA): 500
+    Current Required (mA): 100
+    Extra Operating Current (mA): 0
+    1284 Device ID: MANUFACTURER:HPRT;MODEL:TP582;ACTIVE COMMAND:ESC/POS
+```
+
+这就说明你的打印机成功被识别了。里面的 `Product ID` 和 `Vendor ID` 就是我们需要的。如何连接请看下面的示例代码。
+
+### Linux Example
+以下代码在 MacOS 15.3.1 + 汉印 HPRT TP582 上进行测试
+
+MacOS 的用户字体一般在 `~/Library/Fonts` 中, 你可以随便找一个替换进去
+
+```py
+from escpos_printer import EscPosPrinter, PrinterConfig, UsbInfo
+from const import FONT_SIZES
+from PIL import Image, ImageDraw
+
+
+def draw_hollow_square(
+    size: int,
+    square_size: int,
+    line_width: int = 2,
+    corner_radius: int = 0,
+    line_color: str = "black",
+    background_color: str = "white",
+):
+    img = Image.new("RGB", (size, size), color=background_color)
+    draw = ImageDraw.Draw(img)
+
+    left = (size - square_size) // 2
+    top = (size - square_size) // 2
+    right = left + square_size
+    bottom = top + square_size
+
+    if corner_radius > 0:
+        draw.rounded_rectangle(
+            [left, top, right, bottom],
+            radius=corner_radius,
+            outline=line_color,
+            width=line_width,
+        )
+    else:
+        draw.rectangle([left, top, right, bottom], outline=line_color, width=line_width)
+
+    return img
+
+if __name__ == "__main__":
+    # 示例：创建一个打印机对象，指定打印机名称和纸张宽度
+    printer = EscPosPrinter(
+        config=PrinterConfig(
+            printer_name="TP582",
+            paper_width="58mm",
+            # 需要绝对路径, 这个库不帮忙解析 ~
+            default_font="/Users/<user-name>/Library/Fonts/NotoSerifCJKsc-Bold.otf",
+        ),
+        # macOS 环境需要传入 usb_info 作为额外的参数
+        usb_info=UsbInfo(
+            vendor_id=0x8100,
+            product_id=0x1919,
+        ),
     )
     checkbox = draw_hollow_square(size=20, square_size=16)
 
