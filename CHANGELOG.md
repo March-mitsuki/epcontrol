@@ -1,3 +1,8 @@
+# 0.7.1
+## Fix
+- EscPosPrinter.qrcode()
+  - 修复了类型判定出错的问题
+
 # 0.7.0
 ## Changed
 - EscPosPrinter.print()

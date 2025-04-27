@@ -895,7 +895,7 @@ class EscPosPrinter:
             if len(size) != 2:
                 raise ValueError("size must be a tuple of (box_size, border).")
             box_size, border = size
-        elif isinstance(size, int):
+        elif isinstance(size, str):
             if size == "sm":
                 box_size = 8
                 border = 2
@@ -907,6 +907,8 @@ class EscPosPrinter:
                 border = 2
             else:
                 raise ValueError("Invalid size. Choose 'sm', 'md', or 'lg'.")
+        else:
+            raise ValueError("size must be a str or a tuple of (box_size, border).")
 
         self.contents.append(QrCode(data=data, box_size=box_size, border=border))
         return self
