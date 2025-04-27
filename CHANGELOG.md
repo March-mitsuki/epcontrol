@@ -1,3 +1,17 @@
+# 0.6.1
+font_sizes 从
+```py
+self.font_sizes = config.font_sizes or DEFAULT_FONT_SIZES
+```
+改为
+```py
+self.font_sizes = {
+   **DEFAULT_FONT_SIZES,
+   **(config.font_sizes if config.font_sizes else {}),
+}
+```
+现在不会直接全部覆盖默认设定了
+
 # 0.6.0
 ## Add
 - PrinterConfig.font_sizes()

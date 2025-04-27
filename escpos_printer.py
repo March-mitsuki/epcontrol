@@ -487,7 +487,10 @@ class EscPosPrinter:
 
         self.padding_x = config.padding_x
 
-        self.font_sizes = config.font_sizes or DEFAULT_FONT_SIZES
+        self.font_sizes = {
+            **DEFAULT_FONT_SIZES,
+            **(config.font_sizes if config.font_sizes else {}),
+        }
 
         if config.platform is None:
             if sys.platform.startswith("win"):
