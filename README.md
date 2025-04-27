@@ -460,3 +460,67 @@ if __name__ == "__main__":
             size="lg"
         ).print()
 ```
+
+## 各平台通用的 API
+
+### Paper width
+这个库可以对应不同纸张大小的打印机, 只需要在 printer_config 中手动指定纸张大小
+```py
+printer = EscPosPrinter(
+    # ...
+    config=PrinterConfig(
+        # ...
+        paper_width="58mm",
+    ),
+)
+```
+
+目前 DEFAULT_PAPER_WIDTH 里默认含有 58mm 和 80mm, 如果你的打印机纸张在这两个之外, 你也可以直接使用 int 指定
+```py
+printer = EscPosPrinter(
+    # ...
+    config=PrinterConfig(
+        # ...
+        paper_width=384, # 384px 就是 58mm 打印机纸张的大小
+    ),
+)
+```
+
+### Font size
+
+不一样字体的同一个字体大小视觉效果也不同, 所以这个库提供了一个接口让你设置你自己的 font_sizes
+```py
+printer = EscPosPrinter(
+    # ...
+    config=PrinterConfig(
+        # ...
+        font_sizes={
+            "xxs": 16,
+            "xs": 20,
+            "sm": 24,
+            "md": 28,
+            "lg": 32,
+            "xl": 36,
+            "xxl": 40,
+        },
+    )
+)
+# 然后你可以这样使用
+printer.text(
+    text="Hello",
+    font_size="xl"
+)
+```
+
+这个库也提供了一套默认的字体大小, 如果你不传递 font_sizes, 那么默认就是这一套
+```py
+DEFAULT_FONT_SIZES = {
+    "xxs": 16,
+    "xs": 20,
+    "sm": 24,
+    "md": 28,
+    "lg": 32,
+    "xl": 36,
+    "xxl": 40,
+}
+```

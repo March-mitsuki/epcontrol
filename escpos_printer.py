@@ -5,7 +5,7 @@ import sys
 from PIL import Image, ImageDraw, ImageFont
 import qrcode
 
-from .const import PAPER_WIDTH, FONT_SIZES
+from .const import DEFAULT_PAPER_WIDTH, DEFAULT_FONT_SIZES
 
 
 @dataclasses.dataclass
@@ -32,23 +32,28 @@ class PrinterConfig:
     """
     打印机配置类
 
-    :param printer_name: 打印机名称
+    :param printer_name: str
+        - 打印机名称
         - 在 Windows 中是 `win32print.OpenPrinter` 的参数
         - 在 Linux 中是 `/dev/usb/lp0` 或 `/dev/usb/lp1` 等设备文件, 会通过 `open` 打开
+        - 在 macOS 中需要传入任意字符串来避免报错, 实际连接通过 `usb_info` 传入
 
-    :param paper_width: 纸张宽度, 详见`const.PAPER_WIDTH`
+    :param paper_width: (str | int)
+        - 纸张宽度, 详见`const.DEFAULT_PAPER_WIDTH`
 
     :param default_font: 默认字体路径
 
-    :param platform: 打印机平台 ("windows" | "linux" | "macos)
+    :param platform: ("windows" | "linux" | "macos)
+        - 操作系统平台
         - default: 自动检测
     """
 
     printer_name: str
-    paper_width: str
+    paper_width: str | int
     default_font: str
     platform: str | None = None
     padding_x: int = 10
+    font_sizes: dict[str, int] | None = None
 
 
 @dataclasses.dataclass
@@ -94,20 +99,30 @@ class Flex:
 
 
 class FlexItemFactory:
-    def __init__(self, default_font: str, paper_width: int):
+    def __init__(self, default_font: str, paper_width: int, font_sizes: dict[str, int]):
         self.default_font = default_font
         self.paper_width = paper_width
+        self.font_sizes = font_sizes
 
     def text(
         self,
         *,
         text,
         aligin="left",
-        font_size=FONT_SIZES["md"],
+        font_size=None,
         font=None,
     ) -> Text:
         if font is None:
             font = self.default_font
+
+        if font_size is None:
+            font_size = self.font_sizes["md"]
+        elif font_size in self.font_sizes:
+            font_size = self.font_sizes[font_size]
+        elif isinstance(font_size, int):
+            font_size = font_size
+        else:
+            raise ValueError("font_size must be an int or a key in DEFAULT_FONT_SIZES.")
 
         return Text(
             text=text,
@@ -456,10 +471,24 @@ class EscPosPrinter:
     def __init__(self, config: PrinterConfig, usb_info: UsbInfo | None = None):
         # Setup printer config
         self._validate_config(config)
+
         self.printer_name = config.printer_name
-        self.paper_width = PAPER_WIDTH[config.paper_width]
+
+        if isinstance(config.paper_width, str):
+            self.paper_width = DEFAULT_PAPER_WIDTH[config.paper_width]
+        elif isinstance(config.paper_width, int):
+            self.paper_width = config.paper_width
+        else:
+            raise ValueError(
+                "Invalid Config: paper_width must be a int or key of DEFAULT_PAPER_WIDTH."
+            )
+
         self.default_font = config.default_font
+
         self.padding_x = config.padding_x
+
+        self.font_sizes = config.font_sizes or DEFAULT_FONT_SIZES
+
         if config.platform is None:
             if sys.platform.startswith("win"):
                 self.platform = "windows"
@@ -481,11 +510,38 @@ class EscPosPrinter:
         self.commands = bytearray()
 
         # add helper
-        self.FlexItem = FlexItemFactory(self.default_font, self.paper_width)
+        self.FlexItem = FlexItemFactory(
+            self.default_font, self.paper_width, self.font_sizes
+        )
 
     def _validate_config(self, config: PrinterConfig):
-        if config.paper_width not in PAPER_WIDTH:
-            raise ValueError("Invalid Config: paper_width. Choose '58mm' or '80mm'.")
+        """
+        Just validate the printer config.
+        Do not modify the config.
+        """
+        if not isinstance(config.paper_width, (str, int)):
+            raise ValueError("Invalid Config: paper_width must be a str or int.")
+        if (
+            isinstance(config.paper_width, str)
+            and config.paper_width not in DEFAULT_PAPER_WIDTH
+        ):
+            raise ValueError(
+                "Invalid Config: paper_width must be a key of DEFAULT_PAPER_WIDTH."
+            )
+
+        if config.font_sizes is not None:
+            if not isinstance(config.font_sizes, dict):
+                raise ValueError("Invalid Config: font_sizes. Must be a dictionary.")
+            for key, value in config.font_sizes.items():
+                if key not in DEFAULT_FONT_SIZES:
+                    raise ValueError(
+                        f"Invalid Config: font_sizes. Unsupported key '{key}'."
+                    )
+                if not isinstance(value, int):
+                    raise ValueError(
+                        f"Invalid Config: font_sizes. Value for '{key}' must be an int."
+                    )
+
         if config.platform is not None and config.platform not in [
             "windows",
             "linux",
@@ -774,7 +830,7 @@ class EscPosPrinter:
         *,
         text,
         align="left",
-        font_size=FONT_SIZES["md"],
+        font_size=None,
         font=None,
         line_spacing=4,
     ):
@@ -792,6 +848,16 @@ class EscPosPrinter:
         """
         if font is None:
             font = self.default_font
+
+        if font_size is None:
+            font_size = self.font_sizes["md"]
+        elif font_size in self.font_sizes:
+            font_size = self.font_sizes[font_size]
+        elif isinstance(font_size, int):
+            font_size = font_size
+        else:
+            raise ValueError("font_size must be an int or a key in self.font_sizes.")
+
         self.contents.append(
             Text(
                 text=text,
@@ -820,19 +886,24 @@ class EscPosPrinter:
         打印二维码
 
         :param data: 二维码内容
-        :param size: 二维码大小 ("sm" | "md" | "lg")
+        :param size: 二维码大小 ("sm" | "md" | "lg" | Tuple[box_size: int, border: int])
         """
-        if size == "sm":
-            box_size = 8
-            border = 2
-        elif size == "md":
-            box_size = 10
-            border = 2
-        elif size == "lg":
-            box_size = 16
-            border = 2
-        else:
-            raise ValueError("Invalid size. Choose 'sm', 'md', or 'lg'.")
+        if isinstance(size, tuple):
+            if len(size) != 2:
+                raise ValueError("size must be a tuple of (box_size, border).")
+            box_size, border = size
+        elif isinstance(size, int):
+            if size == "sm":
+                box_size = 8
+                border = 2
+            elif size == "md":
+                box_size = 10
+                border = 2
+            elif size == "lg":
+                box_size = 16
+                border = 2
+            else:
+                raise ValueError("Invalid size. Choose 'sm', 'md', or 'lg'.")
 
         self.contents.append(QrCode(data=data, box_size=box_size, border=border))
         return self

@@ -1,3 +1,16 @@
+# 0.6.0
+## Add
+- PrinterConfig.font_sizes()
+
+## Change
+- EscPosPrinter.qrcode()
+  - 现在 size 除了 str 还接受一个长度为 2 的 Tuple, 第一个是 box_size, 第二个是 border
+- EscPosPrinter.text()
+  - 现在 font_size 接受 int | str | None
+    - 如果是 int 直接设置
+    - 如果是 str 则从 self.font_sizes 中读取
+    - 如果是 None 默认为 self.font_sizes["md"]
+
 # v0.5.0
 - printer.text()
   - 增加 line_spacing 参数, 当text长度大于一行时的行间距

@@ -1,12 +1,14 @@
-PAPER_WIDTH = {
-    # paer_width: width in px (ESC/POS)
+DEFAULT_PAPER_WIDTH = {
     "58mm": 384,
     "80mm": 512,
 }
 
-FONT_SIZES = {
-    # font_size: height in px (ESC/POS)
-    "sm": 22,
+DEFAULT_FONT_SIZES = {
+    "xxs": 16,
+    "xs": 20,
+    "sm": 24,
     "md": 28,
-    "lg": 34,
+    "lg": 32,
+    "xl": 36,
+    "xxl": 40,
 }
