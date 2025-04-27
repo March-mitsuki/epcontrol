@@ -1,3 +1,8 @@
+# 0.7.0
+## Changed
+- EscPosPrinter.print()
+  - 现在接受 padding_top: int 和 padding_bottom: int 来控制打印内容前后的进纸
+
 # 0.6.1
 font_sizes 从
 ```py

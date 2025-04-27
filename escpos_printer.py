@@ -822,7 +822,7 @@ class EscPosPrinter:
             self._escpos_send_macos()
         else:
             raise ValueError(
-                "Unsupported platform. Only 'windows' and 'linux' are supported."
+                "Unsupported platform. Only 'windows', 'linux', 'macOS' are supported."
             )
 
     # ==========================
@@ -979,7 +979,7 @@ class EscPosPrinter:
         )
         return self
 
-    def print(self):
+    def print(self, padding_top=2, padding_bottom=2):
         """
         打印所有内容
         """
@@ -987,9 +987,9 @@ class EscPosPrinter:
         # fmt: off
         self \
             ._escpos_init() \
-            ._escpos_feed(4) \
+            ._escpos_feed(padding_top) \
             ._image_to_escpos(image) \
-            ._escpos_feed(4) \
+            ._escpos_feed(padding_bottom) \
             ._escpos_cut() \
             ._escpos_send()
         # fmt: on
