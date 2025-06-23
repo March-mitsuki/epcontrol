@@ -1,3 +1,7 @@
+# 0.7.2
+## Fix
+- 修复了 Flex 布局不符合预期的问题
+
 # 0.7.1
 ## Fix
 - EscPosPrinter.qrcode()
