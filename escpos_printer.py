@@ -95,13 +95,15 @@ class Flex:
     horizontal_align: str
     # Vertical alignment: "top" | "center" | "bottom"
     vertical_align: str
-    max_width: int | None = None
+    max_width: int
 
 
 class FlexItemFactory:
-    def __init__(self, default_font: str, paper_width: int, font_sizes: dict[str, int]):
+    def __init__(
+        self, default_font: str, avaliable_width: int, font_sizes: dict[str, int]
+    ):
         self.default_font = default_font
-        self.paper_width = paper_width
+        self.avaliable_width = avaliable_width
         self.font_sizes = font_sizes
 
     def text(
@@ -154,7 +156,7 @@ class FlexItemFactory:
         max_width=None,
     ):
         if max_width == "full":
-            max_width = self.paper_width
+            max_width = self.avaliable_width
 
         if image is None:
             raise ValueError("Image must be provided.")
@@ -171,6 +173,10 @@ class FlexItemFactory:
         vertical_align: str = "top",
         max_width: int | None = None,
     ) -> Flex:
+        # 如果 max_width 未指定，则继承父级 paper_width
+        if max_width is None:
+            max_width = self.avaliable_width
+
         return Flex(
             items=items,
             item_gap=item_gap,
@@ -182,11 +188,11 @@ class FlexItemFactory:
 
 
 class FlexRenderer:
-    def __init__(self, flex: Flex, max_width: int | None):
+    def __init__(self, flex: Flex, max_width: int):
         self.flex_obj = flex
         self.max_width = max_width
 
-    def _render_text(self, text_obj: Text, current_x: int) -> list[Image.Image]:
+    def _render_text(self, text_obj: Text, max_width) -> Image.Image:
         """
         Render a Text object to a list of images, each representing a single line of text.
         Start rendering from the given current_x position.
@@ -203,38 +209,46 @@ class FlexRenderer:
         lines = []
         current_line = ""
         line_images = []
-        if self.max_width is None:
-            available_width = float("inf")
-        else:
-            available_width = self.max_width - current_x
 
         for char in text_obj.text:
             test_line = current_line + char
             dummy_img = Image.new("L", (1, 1), color=255)
             draw = ImageDraw.Draw(dummy_img)
             bbox = draw.textbbox((0, 0), test_line, font=font)
-            if bbox[2] > available_width:  # If line exceeds available width
-                lines.append((current_line, available_width))
+            if bbox[2] > max_width:  # If line exceeds available width
+                lines.append((current_line, max_width))
                 current_line = char
-                available_width = self.max_width  # Reset available width for new line
             else:
                 current_line = test_line
         if current_line:  # Add the last line
-            lines.append((current_line, available_width))
+            lines.append((current_line, max_width))
 
+        max_actual_width = 0
         # Render each line as a separate image
         for line, line_width in lines:
             dummy_img = Image.new("L", (1, 1), color=255)
             draw = ImageDraw.Draw(dummy_img)
-            actual_line_width = draw.textbbox((0, 0), line, font=font)[2]
             bbox = draw.textbbox((0, 0), line, font=font)
+            actual_line_width = bbox[2]
+            if actual_line_width > max_actual_width:
+                max_actual_width = actual_line_width
             line_height = bbox[3] - bbox[1]  # Ensure height includes baseline content
             img = Image.new("L", (actual_line_width, line_height), color=255)
             draw = ImageDraw.Draw(img)
             draw.text((0, -bbox[1]), line, font=font, fill=0)  # Adjust for baseline
             line_images.append(img)
+        # print(
+        #     f"[{text_obj.text[:5]}] Max actual width: {max_actual_width}, Max width: {self.max_width}"
+        # )
 
-        return line_images
+        final_img = Image.new(
+            "L", (max_actual_width, sum(img.height for img in line_images)), color=255
+        )
+        current_y = 0
+        for line_img in line_images:
+            final_img.paste(line_img, (0, current_y))
+            current_y += line_img.height
+        return final_img
 
     def _render_qrcode(self, qr_obj: QrCode) -> Image.Image:
         """
@@ -275,53 +289,37 @@ class FlexRenderer:
         # Render each item and calculate positions with wrapping
         rendered_items = []
         item_positions = []
-        current_x = 0
-        current_y = 0
+        current_x = 0  # 目前 Flex 不支持竖向渲染
         max_row_height = 0
         rendered_width = 0
 
         for item in items:
             if isinstance(item, Text):
-                line_images = self._render_text(item, current_x)
-                for line_img in line_images:
-                    item_width, item_height = line_img.size
-
-                    # Check if the item fits in the current row
-                    if self.max_width and current_x + item_width > self.max_width:
-                        # Move to the next row
-                        current_x = 0
-                        current_y += max_row_height + self.flex_obj.row_gap
-                        max_row_height = 0
-
-                    # Update max_row_height for the current row
-                    max_row_height = max(max_row_height, item_height)
-
-                    # Store the position and rendered item
-                    item_positions.append((current_x, current_y))
-                    rendered_items.append(line_img)
-
-                    # Update current_x for the next item, including item_gap
-                    current_x += item_width + self.flex_obj.item_gap
-
-                    # Update rendered_width
-                    rendered_width = max(rendered_width, current_x)
-
-            elif isinstance(item, QrCode):
-                rendered_item = self._render_qrcode(item)
+                rendered_item = self._render_text(item, self.max_width - rendered_width)
                 item_width, item_height = rendered_item.size
-
-                # Check if the item fits in the current row
-                if self.max_width and current_x + item_width > self.max_width:
-                    # Move to the next row
-                    current_x = 0
-                    current_y += max_row_height + self.flex_obj.row_gap
-                    max_row_height = 0
 
                 # Update max_row_height for the current row
                 max_row_height = max(max_row_height, item_height)
 
                 # Store the position and rendered item
-                item_positions.append((current_x, current_y))
+                item_positions.append((current_x, 0))
+                rendered_items.append(rendered_item)
+
+                # Update current_x for the next item, including item_gap
+                current_x += item_width + self.flex_obj.item_gap
+
+                # Update rendered_width
+                rendered_width = max(rendered_width, current_x)
+
+            elif isinstance(item, QrCode):
+                rendered_item = self._render_qrcode(item)
+                item_width, item_height = rendered_item.size
+
+                # Update max_row_height for the current row
+                max_row_height = max(max_row_height, item_height)
+
+                # Store the position and rendered item
+                item_positions.append((current_x, 0))
                 rendered_items.append(rendered_item)
 
                 # Update current_x for the next item, including item_gap
@@ -334,18 +332,11 @@ class FlexRenderer:
                 rendered_item = self._render_image(item)
                 item_width, item_height = rendered_item.size
 
-                # Check if the item fits in the current row
-                if self.max_width and current_x + item_width > self.max_width:
-                    # Move to the next row
-                    current_x = 0
-                    current_y += max_row_height + self.flex_obj.row_gap
-                    max_row_height = 0
-
                 # Update max_row_height for the current row
                 max_row_height = max(max_row_height, item_height)
 
                 # Store the position and rendered item
-                item_positions.append((current_x, current_y))
+                item_positions.append((current_x, 0))
                 rendered_items.append(rendered_item)
 
                 # Update current_x for the next item, including item_gap
@@ -355,37 +346,54 @@ class FlexRenderer:
                 rendered_width = max(rendered_width, current_x)
 
             elif isinstance(item, Flex):
-                # Recursively render nested Flex items
-                nested_renderer = FlexRenderer(item, item.max_width)
-                nested_img = nested_renderer.render()
-                item_width, item_height = nested_img.size
-
-                # Check if the item fits in the current row
-                if current_x + item_width > self.max_width:
-                    # Move to the next row
-                    current_x = 0
-                    current_y += max_row_height + self.flex_obj.row_gap
-                    max_row_height = 0
-
-                # Update max_row_height for the current row
-                max_row_height = max(max_row_height, item_height)
-
-                # Store the position and rendered item
-                item_positions.append((current_x, current_y))
-                rendered_items.append(nested_img)
-
-                # Update current_x for the next item, including item_gap
-                current_x += item_width + self.flex_obj.item_gap
+                # Push the placeholder for nexted flex obj
+                item_positions.append((current_x, 0))
+                rendered_items.append(item)
 
             else:
                 raise ValueError(f"Unsupported item type: {item}")
 
-        # Calculate total height of the rendered content
-        total_height = current_y + max_row_height
+        # 目前只支持嵌套一层 Flex, 多了就出错
+        flex_item_idx = None
+        for i, item in enumerate(rendered_items):
+            if isinstance(item, Flex):
+                flex_item_idx = i
+                break
+        if flex_item_idx is not None:
+            before_flex_item_width = 0
+            after_flex_item_width = 0
+            for j in range(flex_item_idx):
+                before_flex_item_width += (
+                    rendered_items[j].size[0] + self.flex_obj.item_gap
+                )
+            for j in range(flex_item_idx + 1, len(rendered_items)):
+                after_flex_item_width += (
+                    rendered_items[j].size[0] + self.flex_obj.item_gap
+                )
+
+            flex_item_max_width = (
+                self.max_width - before_flex_item_width - after_flex_item_width
+            )
+            nested_renderer = FlexRenderer(
+                rendered_items[flex_item_idx], flex_item_max_width
+            )
+            nested_img = nested_renderer.render()
+            item_width, item_height = nested_img.size
+
+            rendered_items[flex_item_idx] = nested_img
+
+            current_x = 0
+            for idx, item in enumerate(rendered_items):
+                item_positions[idx] = (current_x, 0)
+                current_x += item.size[0] + self.flex_obj.item_gap
+                max_row_height = max(max_row_height, item.size[1])
+
+            rendered_width = current_x + rendered_items[-1].size[0]
 
         # Adjust positions based on horizontal_align
         if self.flex_obj.horizontal_align == "right":
             row_widths = {}
+            rendered_width = self.max_width
             for (x, y), item_img in zip(item_positions, rendered_items):
                 row_widths.setdefault(y, 0)
                 row_widths[y] += item_img.size[0] + self.flex_obj.item_gap
@@ -395,6 +403,7 @@ class FlexRenderer:
                 item_positions[i] = (x + offset, y)
         elif self.flex_obj.horizontal_align == "between":
             row_items = {}
+            rendered_width = self.max_width
             for (x, y), item_img in zip(item_positions, rendered_items):
                 row_items.setdefault(y, []).append((x, item_img))
             for y, items_in_row in row_items.items():
@@ -431,13 +440,7 @@ class FlexRenderer:
                     offset = 0
                 item_positions[i] = (x, y + offset)
 
-        # Create the final image
-        if self.max_width is None:
-            image_width = rendered_width
-        else:
-            image_width = self.max_width
-
-        final_img = Image.new("L", (image_width, total_height), color=255)
+        final_img = Image.new("L", (rendered_width, max_row_height), color=255)
         for (x, y), item_img in zip(item_positions, rendered_items):
             final_img.paste(item_img, (x, y))
 
@@ -514,7 +517,7 @@ class EscPosPrinter:
 
         # add helper
         self.FlexItem = FlexItemFactory(
-            self.default_font, self.paper_width, self.font_sizes
+            self.default_font, self.paper_width - 2 * self.padding_x, self.font_sizes
         )
 
     def _validate_config(self, config: PrinterConfig):
